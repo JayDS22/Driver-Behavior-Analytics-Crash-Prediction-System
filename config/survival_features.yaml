@@ -1,0 +1,16 @@
+features:
+  numeric:
+    - vehicle_age
+    - annual_mileage
+    - driver_age
+    - prior_claims
+    - avg_speed
+    - hard_brake_events
+    - night_driving_pct
+    - urban_driving_pct
+  categorical:
+    - vehicle_type
+    - region
+    - tire_condition
+duration_col: time_to_event
+event_col: event

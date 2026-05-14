@@ -1,0 +1,13 @@
+aws:
+  region: "us-east-1"
+  s3_bucket: "bridgestone-vehicle-safety"
+  s3_prefix: "models/v2.1.0"
+  lambda_function: "vehicle-safety-inference"
+  lambda_memory_mb: 3008
+  lambda_timeout_sec: 30
+  api_gateway: "vehicle-safety-api"
+  cloudwatch:
+    log_group: "/aws/lambda/vehicle-safety-inference"
+    namespace: "DriverBehaviorAnalytics"
+  rds:
+    secret_name: "vehicle-safety/prod/db"

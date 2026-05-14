@@ -1,0 +1,26 @@
+yolo_training:
+  epochs: 300
+  batch_size: 16
+  img_size: 640
+  lr0: 0.01
+  lrf: 0.1
+  momentum: 0.937
+  weight_decay: 0.0005
+  warmup_epochs: 3
+  workers: 8
+  data_yaml: "config/vehicle_dataset.yaml"
+  cfg_yaml: "config/yolov7.yaml"
+
+ensemble_training:
+  features_path: "data/processed/features.csv"
+  target_col: "crash_risk"
+  test_size: 0.2
+  cv_folds: 5
+  random_state: 42
+
+survival_training:
+  data_path: "data/processed/crash_data.csv"
+  duration_col: "time_to_event"
+  event_col: "event"
+  test_size: 0.2
+  random_state: 42

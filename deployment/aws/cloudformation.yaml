@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Bridgestone Driver Behavior Analytics & Crash Prediction System -
+  Lambda + API Gateway + S3 + CloudWatch infrastructure.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+  ModelBucketName:
+    Type: String
+    Default: bridgestone-vehicle-safety
+  LambdaMemoryMB:
+    Type: Number
+    Default: 3008
+  LambdaTimeoutSec:
+    Type: Number
+    Default: 30
+  LambdaCodeS3Bucket:
+    Type: String
+    Description: S3 bucket containing the packaged Lambda zip
+  LambdaCodeS3Key:
+    Type: String
+    Default: dist/inference-lambda.zip
+
+Resources:
+  ModelBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ModelBucketName}-${EnvironmentName}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  InferenceLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ModelBucketReadOnly
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ["s3:GetObject", "s3:ListBucket"]
+                Resource:
+                  - !GetAtt ModelBucket.Arn
+                  - !Sub "${ModelBucket.Arn}/*"
+
+  InferenceLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "vehicle-safety-inference-${EnvironmentName}"
+      Runtime: python3.10
+      Handler: deployment/aws/lambda_function.handler
+      Role: !GetAtt InferenceLambdaRole.Arn
+      MemorySize: !Ref LambdaMemoryMB
+      Timeout: !Ref LambdaTimeoutSec
+      Code:
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref LambdaCodeS3Key
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+          MODEL_BUCKET: !Ref ModelBucket
+          ENVIRONMENT: !Ref EnvironmentName
+
+  InferenceApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "vehicle-safety-api-${EnvironmentName}"
+      ProtocolType: HTTP
+      Target: !GetAtt InferenceLambda.Arn
+
+  InferenceApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref InferenceLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${InferenceApi}/*/*"
+
+  InferenceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/vehicle-safety-inference-${EnvironmentName}"
+      RetentionInDays: 30
+
+Outputs:
+  ApiEndpoint:
+    Description: HTTP API endpoint
+    Value: !Sub "https://${InferenceApi}.execute-api.${AWS::Region}.amazonaws.com"
+  ModelBucketName:
+    Description: Bucket storing trained model artifacts
+    Value: !Ref ModelBucket
