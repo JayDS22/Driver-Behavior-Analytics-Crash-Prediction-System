@@ -40,90 +40,54 @@ hazards** survival model.
 
 ### High-level data flow
 
-```
-                ┌────────────────────────────────────────────────────────┐
-                │              DRIVER BEHAVIOR ANALYTICS                 │
-                │              & CRASH PREDICTION SYSTEM                 │
-                └────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    classDef ingest fill:#1d2a3a,stroke:#58a6ff,stroke-width:2px,color:#e6edf3
+    classDef model fill:#1f2a23,stroke:#3fb950,stroke-width:2px,color:#e6edf3
+    classDef api fill:#2a2520,stroke:#c9a227,stroke-width:2px,color:#e6edf3
+    classDef out fill:#1a1a2e,stroke:#e94560,stroke-width:2px,color:#e6edf3
 
-  Data Sources              Processing Layer                Output Layer
-  ────────────              ────────────────                ────────────
-  • Traffic cameras                                          • Per-vehicle
-  • Vehicle sensors    ┌──────────────────────┐                 risk score
-  • Historical claims  │  src/data            │              • Frame-level
-  • Weather APIs ────▶ │  preprocessing       │ ──┐             risk score
-                       └──────────────────────┘   │           • Crash
-                       ┌──────────────────────┐   │             probability
-                       │  src/models/         │   │             at 1/3/6/12
-                       │  yolo_detector       │ ──┤             months
-                       │  (YOLOv7, 64.5 mAP)  │   │           • Safety alerts
-                       └──────────────────────┘   │           • Dashboard
-                       ┌──────────────────────┐   │
-                       │  src/models/         │   │
-                       │  feature_extractor   │ ──┤
-                       │  (ResNet50 + motion) │   │
-                       └──────────────────────┘   │
-                       ┌──────────────────────┐   │
-                       │  src/models/         │   │
-                       │  ensemble_model      │ ──┤
-                       │  (RF + XGB + MLP)    │   │
-                       └──────────────────────┘   │
-                       ┌──────────────────────┐   │
-                       │  src/models/         │   │
-                       │  survival_analysis   │ ──┘
-                       │  (Cox PH, lifelines) │
-                       └──────────────────────┘
-                                  │
-                                  ▼
-                        ┌────────────────────┐
-                        │  src/api/          │
-                        │  inference_api.py  │
-                        │  FastAPI service   │
-                        └────────────────────┘
-                                  │
-                                  ▼
-        ┌─────────────────────────────────────────────────────────┐
-        │                  DEPLOYMENT TARGETS                     │
-        │                                                         │
-        │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐  │
-        │  │ Local /  │  │ Docker / │  │  AWS     │  │ K8s +   │  │
-        │  │  CLI     │  │ Compose  │  │  Lambda  │  │  HPA    │  │
-        │  └──────────┘  └──────────┘  └──────────┘  └─────────┘  │
-        └─────────────────────────────────────────────────────────┘
+    S[Sources<br/>cameras · sensors · claims · weather]:::ingest
+    P[Preprocessing]:::model
+    Y[YOLOv7 Detector<br/>64.5 mAP]:::model
+    FX[Feature Extractor<br/>ResNet50 + motion]:::model
+    EN[Ensemble Model<br/>RF + XGB + MLP]:::model
+    SU[Cox PH Survival<br/>1/3/6/12-month risk]:::model
+    A[FastAPI inference]:::api
+    O[Outputs<br/>per-vehicle + frame risk<br/>alerts · dashboard]:::out
+    DEP[Deploy<br/>Local · Docker · Lambda · K8s]:::out
+
+    S --> P --> Y & FX & EN & SU --> A --> O
+    A --> DEP
+
+    click P href "src/data" "Preprocessing"
+    click Y href "src/models" "YOLO detector"
+    click FX href "src/models" "Feature extractor"
+    click EN href "src/models" "Ensemble model"
+    click SU href "src/models" "Survival analysis"
+    click A href "src/api" "Inference API"
 ```
 
 ### Inference pipeline per frame
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                       PER-FRAME INFERENCE                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  raw frame ─▶ FramePreprocessor (letterbox + normalize)         │
-│                       │                                         │
-│         ┌─────────────┼─────────────┐                           │
-│         ▼             ▼             ▼                           │
-│   VehicleDetector  FeatureExtractor  metadata                   │
-│   (YOLOv7)         (ResNet50 +       (driver_age, mileage,…)    │
-│                     motion + edges)                             │
-│         │             │             │                           │
-│         └──────┬──────┘             │                           │
-│                ▼                    ▼                           │
-│         EnsembleRiskModel     CoxSurvivalModel                  │
-│         risk = P(crash | vis) crash_prob @ {1, 3, 6, 12} mo     │
-│                │                    │                           │
-│                └────────┬───────────┘                           │
-│                         ▼                                       │
-│             InferenceMonitor (latency / count / errors)         │
-│                         ▼                                       │
-│                  JSON response                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A[Raw frame] --> B[FramePreprocessor<br/>letterbox + normalize]
+    B --> C[VehicleDetector<br/>YOLOv7]
+    B --> D[FeatureExtractor<br/>ResNet50 + motion + edges]
+    B --> E[Metadata<br/>driver_age, mileage, ...]
+    C --> F[EnsembleRiskModel<br/>risk = P crash given vis]
+    D --> F
+    E --> G[CoxSurvivalModel<br/>crash_prob at 1, 3, 6, 12 mo]
+    F --> H[InferenceMonitor<br/>latency / count / errors]
+    G --> H
+    H --> I[JSON Response]
 ```
 
 ### AWS deployment topology
 
 ```
-   client ──▶ API Gateway (HTTP API) ──▶ Lambda (vehicle-safety-inference)
+   client ── API Gateway (HTTP API) ── Lambda (vehicle-safety-inference)
                                               │
                                               ├── S3 (model artifacts, versioned)
                                               ├── CloudWatch (logs + custom metrics)
